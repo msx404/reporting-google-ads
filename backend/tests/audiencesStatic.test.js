@@ -25,9 +25,10 @@ describe('Audiences dashboard static contract', () => {
 
         expect(html).toContain('styles.css?v=1');
         expect(html).toContain('offline.js?v=1');
-        expect(html).toContain('app.js?v=1');
-        expect(worker).toContain("const SHELL_CACHE = 'zenseeo-shell-v1';");
-        expect(worker).toContain("'/app.js?v=1'");
+        expect(html).toContain('app.js?v=2');
+        expect(worker).toContain("const SHELL_CACHE = 'zenseeo-shell-v2';");
+        expect(worker).toContain("'/app.js?v=2'");
+        expect(worker).toContain("'/mutation-history.js?v=1'");
         expect(app).not.toContain('Dashboard section load failed:');
         expect(app).toContain('handleDashboardSectionLoadError(activeDashboardTab(), err);');
     });

@@ -10044,26 +10044,8 @@ function renderControlsState() {
         ]);
     }
     if (isControlSurfaceActive(els.controlsMutationHistory)) {
-        const rows = (controlsState.mutationHistory || []).map(row => ({
-            createdAt: formatDateTimeIst(row.created_at),
-            changeSummary: formatMutationHistoryChange(row),
-            source: formatMutationSource(row.source),
-            status: row.status
-        }));
-        initGrid('grid-controlsMutationHistory', rows, [
-            { field: 'createdAt', headerName: 'Created', pinned: 'left', minWidth: 180, cellRenderer: controlsTextCell },
-            { field: 'changeSummary', headerName: 'Change', minWidth: 420, wrapText: true, autoHeight: true, cellRenderer: controlsTextCell },
-            { field: 'source', headerName: 'Origin', minWidth: 110, maxWidth: 140, cellRenderer: controlsTextCell },
-            { field: 'status', headerName: 'Status', minWidth: 120, maxWidth: 150, cellRenderer: p => controlsStatusChip(p.value) }
-        ]);
+        renderMutationHistory(controlsState.mutationHistory);
     }
-}
-
-function formatMutationSource(source) {
-    const normalized = String(source || '').toLowerCase();
-    if (normalized === 'ui') return 'Dashboard';
-    if (normalized === 'mcp') return 'MCP';
-    return formatControlStatus(source || 'Unknown');
 }
 
 function isControlSurfaceActive(gridEl) {
@@ -10073,17 +10055,6 @@ function isControlSurfaceActive(gridEl) {
     const keywordPanel = gridEl.closest('.keyword-subpanel');
     if (keywordPanel && !keywordPanel.classList.contains('active')) return false;
     return true;
-}
-
-function formatMutationHistoryChange(row) {
-    const payload = row?.preview_payload || {};
-    const diff = Array.isArray(payload.diff) ? payload.diff : [];
-    if (!diff.length) return formatControlStatus(row?.mutation_type);
-    const groups = groupedMutationDiffs(diff);
-    const summaries = groups.slice(0, 3).map(group => formatMutationDiffGroup(group, row?.mutation_type)).filter(Boolean);
-    const remaining = groups.slice(3).reduce((total, group) => total + group.length, 0);
-    const suffix = remaining ? ` + ${remaining} more` : '';
-    return `${summaries.join('; ')}${suffix}` || formatControlStatus(row?.mutation_type);
 }
 
 function groupedMutationDiffs(diff) {

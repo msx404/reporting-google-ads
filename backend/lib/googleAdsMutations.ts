@@ -1693,7 +1693,7 @@ export async function confirmGoogleAdsMutation(pool: Pool, input: {
     if (!row) throw Object.assign(new GoogleAdsMutationValidationError('Mutation preview not found.'), { statusCode: 404 });
     if (row.status !== 'previewed') throw new GoogleAdsMutationValidationError(`Mutation is not confirmable from status ${row.status}.`);
     if (new Date(row.expires_at).getTime() <= Date.now()) {
-        await pool.query(`UPDATE google_ads_mutation_requests SET status = 'expired', updated_at = CURRENT_TIMESTAMP WHERE id = $1`, [input.mutationId]);
+        await pool.query(`UPDATE google_ads_mutation_requests SET status = 'expired', updated_at = CURRENT_TIMESTAMP WHERE id = $1 AND status = 'previewed'`, [input.mutationId]);
         throw Object.assign(new GoogleAdsMutationValidationError('Mutation confirmation token has expired.'), { statusCode: 410 });
     }
     if (row.confirmation_token_hash !== tokenHash) throw Object.assign(new GoogleAdsMutationValidationError('Invalid confirmation token.'), { statusCode: 403 });
@@ -1735,57 +1735,78 @@ export async function confirmGoogleAdsMutation(pool: Pool, input: {
         [input.mutationId]
     );
     if (!claimed.rows.length) throw new GoogleAdsMutationValidationError('Mutation preview was already claimed or is no longer confirmable.');
-    const results: any[] = [];
+    return executeClaimedGoogleAdsMutation(pool, row, operationsByPath);
+}
+
+export async function executeClaimedGoogleAdsMutation(
+    pool: Pool,
+    row: { id: string; customer_id: string; preview_payload: any },
+    operationsByPath: Record<string, unknown>,
+    mutate = mutateGoogleAds
+) {
+    const results: { path: string; requestId: string | null; result: any }[] = [];
     let googleRequestId: string | null = null;
-    const operationPaths = Object.entries(operationsByPath)
-        .filter(([, operations]) => Array.isArray(operations) && operations.length)
-        .map(([path]) => path);
-    let currentPath: string | null = null;
-    try {
-        for (const [path, operations] of Object.entries(operationsByPath)) {
-            if (!Array.isArray(operations) || !operations.length) continue;
-            currentPath = path;
-            const result = await mutateGoogleAds(path, mutationRequestBody(path, operations as any[], false), row.customer_id);
-            googleRequestId = result.requestId || googleRequestId;
-            results.push({ path, result: result.data });
-            currentPath = null;
-        }
-    } catch (err: any) {
-        const normalized = err.googleAdsErrors || normalizeGoogleAdsErrors({ message: err.message });
-        const failedPath = currentPath || operationPaths.find(path => !results.some(result => result.path === path)) || null;
-        const partialFailure = buildGoogleAdsPartialFailureSummary({
-            previewPayload: row.preview_payload,
-            operationPaths,
-            successfulPaths: results.map(result => result.path),
-            failedPath,
-            errors: normalized
-        });
+    const entries = Object.entries(operationsByPath)
+        .filter((entry): entry is [string, any[]] => Array.isArray(entry[1]) && entry[1].length > 0);
+    const operationPaths = entries.map(([path]) => path);
+
+    for (const [path, operations] of entries) {
         await pool.query(
             `UPDATE google_ads_mutation_requests
-             SET status = 'failed', error_payload = $2, updated_at = CURRENT_TIMESTAMP
+             SET result_payload = $2, updated_at = CURRENT_TIMESTAMP
              WHERE id = $1`,
-            [input.mutationId, { errors: normalized, partialFailure, partialResults: results }]
+            [row.id, { results, operationPaths, inFlightPath: path }]
         );
-        throw Object.assign(new GoogleAdsMutationValidationError(partialFailure.message), {
-            errors: normalized,
-            partialFailure,
-            partialResults: results
-        });
+        let receipt: Awaited<ReturnType<typeof mutateGoogleAds>>;
+        try {
+            receipt = await mutate(path, mutationRequestBody(path, operations, false), row.customer_id);
+        } catch (err: any) {
+            const errors = err.googleAdsErrors || normalizeGoogleAdsErrors({ message: err.message });
+            const status = Number(err.status);
+            const outcomeUnknown = !(status >= 400 && status < 500 && status !== 408);
+            const partialFailure = buildGoogleAdsPartialFailureSummary({
+                previewPayload: row.preview_payload,
+                operationPaths,
+                successfulPaths: results.map(result => result.path),
+                failedPath: path,
+                errors
+            });
+            if (outcomeUnknown) {
+                partialFailure.message = 'Google Ads did not confirm the outcome. Check current account state before creating another preview.';
+            }
+            await pool.query(
+                `UPDATE google_ads_mutation_requests
+                 SET status = 'failed', error_payload = $2, updated_at = CURRENT_TIMESTAMP
+                 WHERE id = $1`,
+                [row.id, { errors, outcomeUnknown, partialFailure, partialResults: results, requestId: err.requestId || null }]
+            );
+            throw Object.assign(new GoogleAdsMutationValidationError(partialFailure.message), {
+                errors, partialFailure, partialResults: results
+            });
+        }
+        googleRequestId = receipt.requestId || googleRequestId;
+        results.push({ path, requestId: receipt.requestId, result: receipt.data });
+        await pool.query(
+            `UPDATE google_ads_mutation_requests
+             SET google_request_id = $2, result_payload = $3, updated_at = CURRENT_TIMESTAMP
+             WHERE id = $1`,
+            [row.id, googleRequestId, { results, operationPaths, inFlightPath: null }]
+        );
     }
     await pool.query(
         `UPDATE google_ads_mutation_requests
-         SET status = 'executed', google_request_id = $2, result_payload = $3, updated_at = CURRENT_TIMESTAMP
+         SET status = 'executed', updated_at = CURRENT_TIMESTAMP
          WHERE id = $1`,
-        [input.mutationId, googleRequestId, { results }]
+        [row.id]
     );
-    return { mutationId: input.mutationId, status: 'executed', googleRequestId, results, preview: row.preview_payload };
+    return { mutationId: row.id, status: 'executed', googleRequestId, results, preview: row.preview_payload };
 }
 
 export async function listRecentGoogleAdsMutations(pool: Pool, input: { customerId?: unknown; limit?: unknown } = {}): Promise<any[]> {
     await ensureGoogleAdsMutationSchema(pool);
     await expireOldMutationPreviews(pool);
     const params: any[] = [];
-    const clauses: string[] = [`status = 'executed'`];
+    const clauses: string[] = [`status IN ('executed', 'failed', 'confirmed')`];
     const customerId = normalizeCustomerId(input.customerId);
     if (customerId) {
         params.push(customerId);
@@ -1795,7 +1816,17 @@ export async function listRecentGoogleAdsMutations(pool: Pool, input: { customer
     params.push(limit);
     const where = clauses.length ? `WHERE ${clauses.join(' AND ')}` : '';
     const { rows } = await pool.query(
-        `SELECT id, customer_id, requested_by, source, mutation_type, status, preview_payload,
+        `SELECT id, customer_id, requested_by, source, mutation_type,
+                CASE
+                    WHEN status = 'confirmed' AND result_payload->'inFlightPath' = 'null'::jsonb
+                         AND jsonb_array_length(result_payload->'results') = jsonb_array_length(result_payload->'operationPaths')
+                        THEN 'executed'
+                    WHEN (status = 'confirmed' AND updated_at <= CURRENT_TIMESTAMP - INTERVAL '15 minutes')
+                         OR error_payload->>'outcomeUnknown' = 'true' THEN 'needs_review'
+                    WHEN status = 'confirmed' THEN 'in_progress'
+                    WHEN status = 'failed' AND jsonb_array_length(error_payload->'partialResults') > 0 THEN 'partial'
+                    ELSE status
+                END AS status, preview_payload,
                 expires_at, google_request_id, result_payload, error_payload, created_at, updated_at
          FROM google_ads_mutation_requests
          ${where}
