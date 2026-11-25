@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, test } from 'bun:test';
+import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import {
     clearAdsWarehouseRuntimeCaches,
     getAvailableDashboardFilters,
@@ -36,6 +36,8 @@ const filters = {
 };
 
 describe('dashboard view warehouse bundles', () => {
+    afterEach(clearAdsWarehouseRuntimeCaches);
+
     beforeEach(() => {
         clearAdsWarehouseRuntimeCaches();
     });

@@ -7,7 +7,7 @@ COPY package.json bun.lock* ./
 
 # Install dependencies in the backend folder
 WORKDIR /app
-RUN bun install
+RUN bun install --frozen-lockfile
 
 # Copy all source files
 WORKDIR /app

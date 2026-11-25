@@ -43,7 +43,7 @@ ssh "${SSH_OPTS[@]}" "$REMOTE" "
   set -euo pipefail
   cd '$VPS_PATH'
   test -f .env.vps || { echo 'Missing .env.vps on VPS.' >&2; exit 1; }
-  docker compose --env-file .env.vps -f docker-compose.vps.yml up -d --build
+  docker compose --env-file .env.vps -f docker-compose.vps.yml up -d --build --wait --wait-timeout 180
   docker image prune -f >/dev/null
   docker compose --env-file .env.vps -f docker-compose.vps.yml ps
 "

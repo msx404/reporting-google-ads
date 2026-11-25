@@ -4,7 +4,11 @@ on:
   workflow_dispatch:
 
 jobs:
+  verify:
+    uses: ./.github/workflows/ci.yml
+
   sync:
+    needs: verify
     if: vars.DEPLOY_TARGET == 'hf'
     runs-on: ubuntu-latest
     permissions:
@@ -27,4 +31,7 @@ jobs:
           HF_OIDC_RESOURCE: spaces/${{ vars.HF_SPACE }}
         run: |
           test -n "$HF_SPACE"
-          hf upload "$HF_SPACE" . . --repo-type=space
+          upload_dir="$(mktemp -d)"
+          git archive HEAD:backend | tar -x -C "$upload_dir"
+          cp README.md "$upload_dir/README.md"
+          hf upload "$HF_SPACE" "$upload_dir" . --repo-type=space
