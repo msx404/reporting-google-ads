@@ -82,7 +82,10 @@ describe('Google Ads controls static coverage', () => {
         expect(app).not.toContain("initGrid('grid-controlsKeywords'");
         expect(app).not.toContain("initGrid('grid-controlsNegatives'");
         expect(app).toContain("initGrid('grid-controlsSchedules'");
-        expect(app).toContain("initGrid('grid-controlsMutationHistory'");
+        const mutationHistory = fs.readFileSync(path.join(root, 'client/mutation-history.js'), 'utf8');
+        expect(app).toContain('renderMutationHistory(controlsState.mutationHistory)');
+        expect(mutationHistory).toContain("initGrid('grid-controlsMutationHistory'");
+        expect(mutationHistory).toContain('Check current Google Ads state');
         expect(app).toContain("'activity-history': ''");
         expect(app).toContain("['campaigns', 'ad-groups', 'keywords', 'ad-schedule', 'activity-history'].includes(tabId)");
         expect(app).toContain('/api/account-controls/mutations/preview');

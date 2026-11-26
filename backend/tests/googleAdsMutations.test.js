@@ -4,6 +4,7 @@ import path from 'path';
 import {
     buildGoogleAdsPartialFailureSummary,
     buildGoogleAdsMutationOperations,
+    executeClaimedGoogleAdsMutation,
     hashConfirmationToken,
     listRecentGoogleAdsMutations,
     normalizeKeywordText,
@@ -309,7 +310,7 @@ describe('Google Ads mutation validation', () => {
         expect(hashConfirmationToken('confirm-me')).toBe(hash);
     });
 
-    test('mutation history only lists successfully executed changes', async () => {
+    test('mutation history includes failed and in-progress confirmations but excludes previews', async () => {
         const queries = [];
         const pool = {
             async query(sql, params) {
@@ -323,7 +324,9 @@ describe('Google Ads mutation validation', () => {
         const expiry = queries.find(query => query.sql.includes('UPDATE google_ads_mutation_requests') && query.sql.includes("status = 'expired'"));
         expect(expiry.sql).toContain("status = 'previewed'");
         const select = queries.find(query => query.sql.includes('FROM google_ads_mutation_requests') && query.sql.includes('SELECT id'));
-        expect(select.sql).toContain("status = 'executed'");
+        expect(select.sql).toContain("status IN ('executed', 'failed', 'confirmed')");
+        expect(select.sql).toContain("status = 'confirmed' AND updated_at <=");
+        expect(select.sql).toContain("THEN 'needs_review'");
     });
 
     test('mutation previews are durable DB rows, not in-process map entries', () => {
@@ -464,5 +467,64 @@ describe('Google Ads mutation validation', () => {
         expect(summary.message).toContain('Applied: add campaign negative keyword "free" to campaign 111');
         expect(summary.message).toContain('Failed: add ad group negative keyword "jobs" to ad group 222');
         expect(summary.message).toContain('Google Ads said: Keyword text is invalid.');
+    });
+});
+
+describe('claimed mutation execution outcomes', () => {
+    const row = { id: 'mutation', customer_id: '1234567890', preview_payload: {} };
+    const operations = {
+        'campaigns:mutate': [{}],
+        'adGroups:mutate': [{}]
+    };
+
+    function recordWrites(failAt = 0) {
+        const writes = [];
+        return {
+            writes,
+            async query(sql, params) {
+                if (writes.length + 1 === failAt) throw new Error('database unavailable');
+                writes.push({ sql, params: structuredClone(params) });
+                return { rows: [] };
+            }
+        };
+    }
+
+    test('keeps a successful receipt when a later API call is rejected', async () => {
+        const pool = recordWrites();
+        await expect(executeClaimedGoogleAdsMutation(pool, row, operations, async path => {
+            if (path === 'adGroups:mutate') throw Object.assign(new Error('rejected'), { status: 400 });
+            return { requestId: 'first-receipt', data: {} };
+        })).rejects.toThrow();
+
+        expect(pool.writes[1].params[2].results[0].requestId).toBe('first-receipt');
+        expect(pool.writes[2].params[1].inFlightPath).toBe('adGroups:mutate');
+        expect(pool.writes[3].params[1]).toMatchObject({
+            outcomeUnknown: false,
+            partialResults: [{ path: 'campaigns:mutate', requestId: 'first-receipt' }]
+        });
+    });
+
+    test('records an unknown outcome after a timeout and stops subsequent calls', async () => {
+        const pool = recordWrites();
+        const calls = [];
+        await expect(executeClaimedGoogleAdsMutation(pool, row, operations, async path => {
+            calls.push(path);
+            throw new Error('request timed out');
+        })).rejects.toThrow('Check current account state');
+
+        expect(calls).toEqual(['campaigns:mutate']);
+        expect(pool.writes[1].params[1].outcomeUnknown).toBe(true);
+    });
+
+    test('leaves the in-flight call recorded if Google accepts it before a database failure', async () => {
+        const pool = recordWrites(2);
+        const calls = [];
+        await expect(executeClaimedGoogleAdsMutation(pool, row, operations, async path => {
+            calls.push(path);
+            return { requestId: 'receipt', data: {} };
+        })).rejects.toThrow('database unavailable');
+
+        expect(calls).toEqual(['campaigns:mutate']);
+        expect(pool.writes[0].params[1].inFlightPath).toBe('campaigns:mutate');
     });
 });

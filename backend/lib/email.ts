@@ -1,5 +1,4 @@
-import nodemailer from 'nodemailer';
-import type SMTPTransport from 'nodemailer/lib/smtp-transport';
+import nodemailer, { type SMTPTransportOptions, type SMTPSentMessageInfo, type Transporter } from 'nodemailer';
 import crypto from 'crypto';
 
 const DEFAULT_SEND_TIMEOUT_MS = 15_000;
@@ -61,7 +60,7 @@ function publicDashboardBaseUrl(): string {
     return value;
 }
 
-function smtpOptions(): SMTPTransport.Options {
+function smtpOptions(): SMTPTransportOptions {
     const host = requiredEnv('SMTP_HOST');
     const user = requiredEnv('SMTP_USER');
     const pass = normalizeSmtpPassword(host, requiredEnv('SMTP_PASS'));
@@ -76,9 +75,9 @@ function smtpOptions(): SMTPTransport.Options {
     };
 }
 
-let transport: nodemailer.Transporter<SMTPTransport.SentMessageInfo> | null = null;
+let transport: Transporter<SMTPSentMessageInfo> | null = null;
 
-function mailTransport(): nodemailer.Transporter<SMTPTransport.SentMessageInfo> {
+function mailTransport(): Transporter<SMTPSentMessageInfo> {
     if (!transport) transport = nodemailer.createTransport(smtpOptions());
     return transport;
 }

@@ -22,7 +22,8 @@ import {
     replaceCampaignDailyWindow,
     replaceKeywordDailyWindow,
     replaceSearchTermDailyWindow,
-    setCachedDashboardPayload
+    setCachedDashboardPayload,
+    startWarehouseRefreshRun
 } from '../lib/adsWarehouse.ts';
 
 const TEST_DATABASE_URL = process.env.TEST_DATABASE_URL;
@@ -349,7 +350,8 @@ async function deleteCustomerRows(pool, customerId) {
         'dashboard_payload_cache',
         'google_ads_warehouse_slice_fingerprints',
         'google_ads_report_coverage',
-        'google_ads_campaign_daily'
+        'google_ads_campaign_daily',
+        'google_ads_refresh_runs'
     ]) {
         await pool.query(`DELETE FROM ${table} WHERE customer_id = $1`, [customerId]);
     }
@@ -1038,38 +1040,29 @@ describe('ads warehouse repository', () => {
         });
         const customerId = `test_${Date.now()}`;
         const allDates = dates('2026-01-01', 10);
+        const runId = `${customerId}_backfill`;
         try {
             await ensureAdsWarehouseSchema(pool);
-            await deleteCustomerRows(pool, customerId);
+            await startWarehouseRefreshRun(pool, { id: runId, customerId, kind: 'backfill' });
 
-            const rows = allDates.map((date, index) => ({
-                customer_id: customerId,
-                date,
-                campaign_id: '111',
-                campaign_name: 'Warehouse Fixture Campaign',
-                campaign_status: 'ENABLED',
-                bidding_strategy_type: 'MAXIMIZE_CONVERSIONS',
-                cost_micros: (index + 1) * 1_000_000,
-                clicks: index + 1,
-                impressions: 100 + index,
-                conversions: index % 2,
-                conversions_value: (index % 2) * 200,
-                raw_payload: {
-                    'customer.id': customerId,
-                    'segments.date': date,
-                    'campaign.id': '111',
-                    'campaign.name': 'Warehouse Fixture Campaign',
-                    'metrics.cost_micros': (index + 1) * 1_000_000,
-                    'metrics.clicks': index + 1,
-                    'metrics.impressions': 100 + index,
-                    'metrics.conversions': index % 2,
-                    'metrics.conversions_value': (index % 2) * 200
-                }
+            const rawRows = allDates.map((date, index) => ({
+                'customer.id': customerId,
+                'segments.date': date,
+                'campaign.id': '111',
+                'campaign.name': 'Warehouse Fixture Campaign',
+                'campaign.status': 'ENABLED',
+                'campaign.bidding_strategy_type': 'MAXIMIZE_CONVERSIONS',
+                'metrics.cost_micros': (index + 1) * 1_000_000,
+                'metrics.clicks': index + 1,
+                'metrics.impressions': 100 + index,
+                'metrics.conversions': index % 2,
+                'metrics.all_conversions': index % 2,
+                'metrics.conversions_value': (index % 2) * 200
             }));
-
-            await replaceCampaignDailyWindow(pool, customerId, '2026-01-01', '2026-01-10', rows, 'test_all_time_backfill');
+            const { campaignDaily } = mapReportRows('campaign_performance', customerId, rawRows);
+            await replaceCampaignDailyWindow(pool, customerId, '2026-01-01', '2026-01-10', campaignDaily, runId);
             await markReportCoverage(pool, {
-                runId: 'test_all_time_backfill',
+                runId,
                 customerId,
                 reportName: 'campaign_performance',
                 startDate: '2026-01-01',

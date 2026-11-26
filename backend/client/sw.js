@@ -1,10 +1,11 @@
-const SHELL_CACHE = 'zenseeo-shell-v1';
+const SHELL_CACHE = 'zenseeo-shell-v2';
 const STATIC_CACHE = 'zenseeo-static-v1';
 const SHELL_URLS = [
   '/',
   '/styles.css?v=1',
   '/offline.js?v=1',
-  '/app.js?v=1',
+  '/mutation-history.js?v=1',
+  '/app.js?v=2',
   '/manifest.webmanifest',
   '/logo.png',
   '/vendor/chart.umd.min.js',
@@ -45,7 +46,7 @@ function isStatic(url) {
   return url.pathname.startsWith('/vendor/')
     || url.pathname.startsWith('/fonts/')
     || url.pathname.startsWith('/icons/')
-    || ['/styles.css', '/offline.js', '/app.js', '/manifest.webmanifest', '/logo.png'].includes(url.pathname);
+    || ['/styles.css', '/offline.js', '/mutation-history.js', '/app.js', '/manifest.webmanifest', '/logo.png'].includes(url.pathname);
 }
 
 async function precacheShellAssets(cache, urls = SHELL_URLS, fetcher = fetch) {

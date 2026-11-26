@@ -106,7 +106,7 @@ The browser dashboard and MCP mutation tools support only:
 - campaign ad schedule add/remove/replace,
 - campaign/ad-group pause/resume.
 
-Browser controls are intentionally placed where operators already review the affected entity: campaign status on `Campaigns`, ad group status on `Ad Groups`, keyword and negative keyword controls on the `Keywords` page subtabs, ad schedule controls on `Ad Schedule`, and successfully executed mutation audit rows on `Activity History`. Ad schedule day presets expand into individual days and any overlapping proposed intervals must be resolved by replacing existing conflicting schedules or keeping them and skipping the overlapping proposed days before preview. Offline conversion uploads remain pull-CSV/API-only; the `Conversions` page `Auth` tab only manages DB-backed Basic Auth credentials for Google Ads Data Manager.
+Browser controls are intentionally placed where operators already review the affected entity: campaign status on `Campaigns`, ad group status on `Ad Groups`, keyword and negative keyword controls on the `Keywords` page subtabs, ad schedule controls on `Ad Schedule`, and mutation outcomes on `Activity History`. Ad schedule day presets expand into individual days and any overlapping proposed intervals must be resolved by replacing existing conflicting schedules or keeping them and skipping the overlapping proposed days before preview. Offline conversion uploads remain pull-CSV/API-only; the `Conversions` page `Auth` tab only manages DB-backed Basic Auth credentials for Google Ads Data Manager.
 
 Execution is disabled unless this flag is set:
 
@@ -115,7 +115,7 @@ GOOGLE_ADS_MUTATIONS_ENABLED=true
 GOOGLE_ADS_MUTATION_CONFIRM_TTL_MINUTES=10
 ```
 
-All mutations must be previewed first. Preview returns a diff, operation summary, confirmation token, and expiry; preview state is transient and is not shown in Activity History. Confirm requires the token and stores only successfully executed results in `google_ads_mutation_requests`. Confirmation tokens are stored only as SHA-256 hashes for executed rows. Account-level/shared-list negative creation, deletes of campaigns/ad groups, budget changes, bid changes, ad edits, and direct offline upload calls are intentionally out of scope.
+All mutations must be previewed first. Preview returns a diff, operation summary, confirmation token, and expiry; previews expire automatically and are excluded from Activity History. Confirmation requires the token and records each Google Ads API call and its receipt in `google_ads_mutation_requests`. Tokens are stored as SHA-256 hashes. Activity History shows in-progress, successful, failed, partial, and unresolved confirmations. For **Needs Review**, inspect the reported operation and current state in Google Ads before creating a new preview for any change that still needs to be applied. A claimed preview cannot be replayed. Account-level/shared-list negative creation, deletes of campaigns/ad groups, budget changes, bid changes, ad edits, and direct offline upload calls are intentionally out of scope.
 
 For Google Ads Data Manager offline conversion pulls, use `GET /api/analytics/offline-conversions.csv` with Basic Auth. Configure, reveal, or rotate those Basic Auth credentials from the logged-in dashboard under `Conversions` → `Auth`; PostgreSQL stores the username, a salted password hash for verification, and an encrypted password copy for dashboard reveal. The logged-in dashboard CSV remains `GET /api/leads/offline-conversions.csv`.
 
@@ -151,12 +151,12 @@ Set the printed `MCP_API_KEYS_JSON` on the backend. Set the printed `MCP_API_KEY
 
 Only one GitHub deployment workflow should be active for normal pushes.
 
-- VPS deploy workflow: `backend/.github/workflows/deploy-vps.yml`
-- Hugging Face fallback workflow: `backend/.github/workflows/sync-hf-space.yaml`
+- VPS deploy workflow: `.github/workflows/deploy-vps.yml`
+- Hugging Face fallback workflow: `.github/workflows/sync-hf-space.yaml`
 
-For VPS deploys, create a GitHub **Environment** named `VPS`. The VPS workflow attaches to that environment, so environment-level secrets and variables are available to the job.
+For VPS deploys, configure GitHub environments named `VPS-Staging` and `VPS` with the corresponding host, secrets, and variables. Manual dispatch defaults to `VPS-Staging`.
 
-The VPS workflow runs on pushes to `main` and manual dispatch. The Hugging Face workflow is manual-only, so it will not deploy or show skipped jobs on normal VPS pushes.
+Both deployment workflows run on manual dispatch and require CI to pass. Validate the VPS workflow against a staging environment before enabling deployments on pushes to `main`.
 
 If you later want to manually run the Hugging Face fallback workflow, set this repository variable in the **backend repository** before running it:
 
@@ -164,9 +164,9 @@ If you later want to manually run the Hugging Face fallback workflow, set this r
 DEPLOY_TARGET=hf
 ```
 
-Then run `backend/.github/workflows/sync-hf-space.yaml` manually. For VPS-only operation, no `DEPLOY_TARGET` variable is required.
+Then run `.github/workflows/sync-hf-space.yaml` manually. For VPS-only operation, no `DEPLOY_TARGET` variable is required.
 
-If you want to make Hugging Face impossible to trigger accidentally, remove or comment out `workflow_dispatch:` in `backend/.github/workflows/sync-hf-space.yaml`.
+If you want to make Hugging Face impossible to trigger accidentally, remove or comment out `workflow_dispatch:` in `.github/workflows/sync-hf-space.yaml`.
 
 ---
 
@@ -408,7 +408,7 @@ Hugging Face Spaces does not have a direct one-click GitHub connect button. Setu
 4. In the backend GitHub repository, set:
    - Variable `DEPLOY_TARGET=hf`
    - Variable `HF_SPACE=YOUR_HF_USERNAME/YOUR_SPACE_NAME`
-5. `backend/.github/workflows/sync-hf-space.yaml` will upload the backend repo root to the Space.
+5. `.github/workflows/sync-hf-space.yaml` will upload the backend repo root to the Space.
 
 Hugging Face will build the container from `backend/Dockerfile` and start the server.
 
@@ -425,7 +425,7 @@ Prepare the VPS once with Docker and SSH access. Then configure the `VPS` GitHub
 - Secret `VPS_ENV_FILE`: full contents of the production `.env.vps`; use `backend/.env.vps.example` as the template.
 - Optional variables: `VPS_USER` (default `ubuntu`), `VPS_PORT` (default `22`), `VPS_PATH` (default `/home/ubuntu/google-ads-backend`).
 
-`backend/.github/workflows/deploy-vps.yml` copies the backend repo root to the VPS and runs:
+`.github/workflows/deploy-vps.yml` copies the backend repo root to the VPS and runs:
 
 ```bash
 docker compose --env-file .env.vps -f docker-compose.vps.yml up -d --build
@@ -493,7 +493,7 @@ The dashboard's **Data** button runs a full rolling/backfill refresh and updates
 When cutting over from HF/Neon to VPS/local PostgreSQL:
 
 - Use the `VPS` GitHub Environment for the VPS workflow secrets and variables.
-- Do not manually run `backend/.github/workflows/sync-hf-space.yaml` during VPS operation.
+- Do not manually run `.github/workflows/sync-hf-space.yaml` during VPS operation.
 - Update MCP `API_BASE` from the HF URL to `http://YOUR_VPS_PUBLIC_IP:7860` or your VPS domain.
 - Omit `HF_TOKEN` from MCP config when using the bundled proxy; `MCP/mcp-server.js` sends only `MCP_API_KEY` to `/api/mcp`.
 - Update MCP clients to use `MCP_API_KEY`. `SECRET_API_KEY` can remain the same for dashboard/admin/cron endpoints, but MCP will not use it.

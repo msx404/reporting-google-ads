@@ -2,13 +2,26 @@ name: Deploy Backend to VPS
 
 on:
   workflow_dispatch:
-  push:
-    branches: [main]
+    inputs:
+      target:
+        description: GitHub environment
+        type: choice
+        default: VPS-Staging
+        options:
+          - VPS-Staging
+          - VPS
 
 jobs:
+  verify:
+    uses: ./.github/workflows/ci.yml
+
   deploy:
+    needs: verify
     runs-on: ubuntu-latest
-    environment: VPS
+    environment: ${{ inputs.target }}
+    defaults:
+      run:
+        working-directory: backend
     env:
       VPS_HOST: ${{ secrets.VPS_HOST }}
       VPS_USER: ${{ vars.VPS_USER || 'ubuntu' }}

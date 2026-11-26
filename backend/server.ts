@@ -2439,7 +2439,7 @@ if (serveDashboardClient) {
         res.setHeader('Cache-Control', 'no-cache');
         res.type('application/javascript').sendFile(path.join(dashboardClientPath, 'sw.js'));
     });
-    app.get(['/styles.css', '/app.js', '/offline.js'], (req: Request, res: Response) => {
+    app.get(['/styles.css', '/app.js', '/offline.js', '/mutation-history.js'], (req: Request, res: Response) => {
         sendClientFile(res, req.path.replace(/^\//, ''), 'no-cache');
     });
     const publicAssetFiles = {

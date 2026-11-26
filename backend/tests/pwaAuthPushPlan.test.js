@@ -60,7 +60,9 @@ describe('dashboard PWA/auth/push plan coverage', () => {
         const html = fs.readFileSync(path.join(clientRoot, 'index.html'), 'utf8');
         const assetReferences = [...html.matchAll(/(?:src|href)="([^"#?]+)"/g)]
             .map(match => match[1])
-            .filter(reference => !reference.includes('://') && !reference.startsWith('data:'));
+            .filter(reference => !reference.includes('://') && !reference.startsWith('data:') && reference !== 'config.js');
+
+        expect(fs.existsSync(path.join(clientRoot, 'config.example.js'))).toBe(true);
 
         expect(assetReferences.length).toBeGreaterThan(0);
         for (const reference of assetReferences) {
